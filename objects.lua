@@ -83,13 +83,16 @@ end
 function Objects.draw()
     -- Keep existing code (with the pile indicator if you added it!)
     for _, obj in ipairs(Objects.list) do
-        local drawX = (obj.x - 1) * Map.tileSize
-        local drawY = (obj.y - 1) * Map.tileSize
-        local scale = Map.tileSize / 32
-        love.graphics.setColor(obj.color)
-        love.graphics.draw(Assets.tileTexture, Assets.quads.item, drawX, drawY, 0, scale, scale)
-        love.graphics.setColor(0, 0, 0)
-        love.graphics.print(obj.symbol, drawX + 14, drawY + 10)
+        -- [NEW] VISIBILITY CHECK
+        if Map.isVisible(obj.x, obj.y) then
+            local drawX = (obj.x - 1) * Map.tileSize
+            local drawY = (obj.y - 1) * Map.tileSize
+            local scale = Map.tileSize / 32
+            love.graphics.setColor(obj.color)
+            love.graphics.draw(Assets.tileTexture, Assets.quads.item, drawX, drawY, 0, scale, scale)
+            love.graphics.setColor(0, 0, 0)
+            love.graphics.print(obj.symbol, drawX + 14, drawY + 10)
+        end
     end
     love.graphics.setColor(1, 1, 1)
 end

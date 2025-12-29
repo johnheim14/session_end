@@ -17,11 +17,14 @@ function GameLog.add(message, color)
 end
 
 function GameLog.draw()
-    local start_y = love.graphics.getHeight() - 200
+    local screenW = love.graphics.getWidth()
+    local screenH = love.graphics.getHeight()
+    local start_y = screenH - 200
     
     -- Draw a semi-transparent background box for the log
     love.graphics.setColor(0, 0, 0, 0.8)
-    love.graphics.rectangle("fill", 0, start_y, 800, 200)
+    -- [UPDATED] Use screenW instead of hardcoded 800 so it stretches on maximize
+    love.graphics.rectangle("fill", 0, start_y, screenW, 200)
     
     -- Draw the text
     for i, msg in ipairs(GameLog.history) do
