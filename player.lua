@@ -4,8 +4,8 @@ local Assets = require "assets"
 local Player = {}
 
 function Player.load()
-    Player.gridX = 2
-    Player.gridY = 2
+    Player.gridX = 25
+    Player.gridY = 25
     Player.name = "Wanderer"
 
     -- [FIXED] 1. DEFINE STATS FIRST so derived stats can use them
