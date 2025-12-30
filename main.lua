@@ -7,13 +7,20 @@ local Menu = require "menu"
 local Assets = require "assets"
 local Time = require "time"
 local Combat = require "combat"
+local ItemDB = require "item_db"
 
 -- Current Game State
 local gameState = "AWAKE"
 local lastState = "AWAKE"
 
-local lootList = {} -- Stores the items currently in the pile
-local lootIndex = 1 -- Which item is currently selected
+local lootList = {}
+local lootIndex = 1
+
+-- [NEW] Track current container being looted
+local currentContainer = nil
+
+-- [NEW] PUT menu state
+local putMenuIndex = 1
 
 -- Targeting State Variables
 local targetList = {}
@@ -30,38 +37,41 @@ function love.load()
     Player.isPlayer = true
     setupTestWorld()
 
-    -- Initialize FOV
     Map.updateFOV(Player.gridX, Player.gridY)
 end
 
 function setupTestWorld()
     Player.addItem("Starter Knife", "A rusty blade.", nil)
+    
+    -- [NEW] Spawn a test container with items
+    Objects.spawnFromDB("footlocker", 15, 15)
+    local locker = Objects.getObjectAt(15, 15)
+    if locker and locker.isContainer then
+        locker.addItem("stimpak")
+        locker.addItem("pistol")
+        locker.addItem("bandage")
+        locker.addItem("whiskey")
+    end
+    
     GameLog.add("DEBUG MODE: Map Loaded.", { 1, 0, 0 })
 end
 
 function love.update(dt)
-    -- [FIX] SYNC GAME STATE WITH COMBAT STATUS
-    -- If Player.lua starts combat, we detect it here and force the state change.
     if Combat.isActive then
-        -- If we are running around (AWAKE), switch to COMBAT immediately
         if gameState == "AWAKE" then
             gameState = "COMBAT"
         end
     else
-        -- If combat ended, ensure we aren't stuck in COMBAT state
         if gameState == "COMBAT" or gameState == "TARGETING" then
             gameState = "AWAKE"
         end
     end
 
     if gameState == "COMBAT" then
-        -- 1. COMBAT LOGIC
-        Player.update(dt) -- Animate player
+        Player.update(dt)
         
-        -- If it's the Enemy's turn, run their AI
         local currentActor = Combat.turnQueue[Combat.turnIndex]
         if currentActor and not currentActor.isPlayer then
-            -- Simple AI: Wait 1 second then end turn (placeholder)
             currentActor.aiTimer = (currentActor.aiTimer or 0) + dt
             if currentActor.aiTimer > 1 then
                 currentActor.aiTimer = 0
@@ -70,28 +80,10 @@ function love.update(dt)
         end
 
     elseif gameState == "AWAKE" then
-        -- 2. EXPLORATION LOGIC
         Player.update(dt)
-        Time.update(dt) 
-        
-        -- TEST KEY: Press 'K' to force start combat for testing
-        if love.keyboard.isDown("k") and not Combat.isActive then
-            local dummyEnemy = { 
-                name = "RadRoach", 
-                maxStamina = 3, 
-                currentStamina = 3,
-                maxHP = 20, 
-                currentHP = 20,
-                stats = { reflexes = 2 },
-                isEnemy = true
-            }
-            Combat.start(Player, { dummyEnemy })
-            -- State will sync automatically next frame due to the check at top
-        end
+        Time.update(dt)
     end
 
-    -- [FIX] CAMERA FOLLOW LOGIC
-    -- Calculate target position (center of player tile)
     local px = (Player.gridX - 1) * Map.tileSize + (Map.tileSize / 2)
     local py = (Player.gridY - 1) * Map.tileSize + (Map.tileSize / 2)
     Camera.setFollowTarget(px, py)
@@ -100,7 +92,6 @@ end
 function love.draw()
     love.graphics.clear(0.1, 0.1, 0.1)
 
-    -- 1. Draw World
     Map.draw(-Camera.x, -Camera.y, Camera.scale, Camera.scale)
 
     Camera.set()
@@ -108,24 +99,20 @@ function love.draw()
     Player.draw()
     Camera.unset()
 
-    -- Lighting Overlay
     love.graphics.setBlendMode("multiply", "premultiplied")
     love.graphics.setColor(0.8, 0.8, 0.8, 1)
     love.graphics.rectangle("fill", 0, 0, love.graphics.getWidth(), love.graphics.getHeight())
     love.graphics.setBlendMode("alpha")
     love.graphics.setColor(1, 1, 1)
 
-    -- 2. Draw UI
     GameLog.draw()
 
     love.graphics.setColor(1, 1, 1)
     love.graphics.print("HP: " .. Player.currentHealth, 10, 10)
 
-    -- DRAW STAMINA / STATE
     if gameState == "COMBAT" or gameState == "TARGETING" then
-        love.graphics.setColor(0, 1, 0) -- Green
+        love.graphics.setColor(0, 1, 0)
         love.graphics.print("STAMINA: " .. Player.currentStamina .. " / " .. Player.maxStamina, 10, 30)
-        -- Helpful tip for passing turn
         love.graphics.print("COMBAT: [F] Shoot, [SPACE] Pass Turn", 10, 50)
     else
         love.graphics.print("Stress: " .. Player.currentStress, 10, 30)
@@ -141,9 +128,12 @@ function love.draw()
         love.graphics.setColor(0, 1, 0)
         love.graphics.print(">> INTERACT: Press Direction (WASD) <<", 10, 70)
         love.graphics.setColor(1, 1, 1)
+    elseif gameState == "CONTAINER_PUT" then
+        love.graphics.setColor(1, 1, 0)
+        love.graphics.print(">> PUT MODE: Select item to store <<", 10, 70)
+        love.graphics.setColor(1, 1, 1)
     end
 
-    -- DRAW TARGETING MENU
     if gameState == "TARGETING" then
         love.graphics.setColor(0, 0, 0, 0.9)
         love.graphics.rectangle("fill", 50, 80, 200, 200)
@@ -167,23 +157,112 @@ function love.draw()
         local screenY = ((Player.gridY * Map.tileSize) - Camera.y) * Camera.scale - 20
 
         love.graphics.setColor(0, 0, 0, 0.9)
-        love.graphics.rectangle("fill", screenX, screenY, 150, #lootList * 20 + 10)
+        love.graphics.rectangle("fill", screenX, screenY, 150, #lootList * 20 + 50)
         love.graphics.setColor(0, 1, 0)
-        love.graphics.rectangle("line", screenX, screenY, 150, #lootList * 20 + 10)
+        love.graphics.rectangle("line", screenX, screenY, 150, #lootList * 20 + 50)
+
+        -- [NEW] Show container name if looting a container
+        if currentContainer then
+            love.graphics.setColor(1, 1, 0)
+            love.graphics.print(currentContainer.name, screenX + 5, screenY + 5)
+            love.graphics.setColor(0.7, 0.7, 0.7)
+            love.graphics.print("[E]Take [R]Put", screenX + 5, screenY + 20)
+            love.graphics.setColor(0, 1, 0)
+        end
 
         for i, obj in ipairs(lootList) do
+            local yOffset = currentContainer and 40 or 5
             if i == lootIndex then
                 love.graphics.setColor(1, 1, 0)
-                love.graphics.print("> " .. obj.name, screenX + 5, screenY + 5 + ((i - 1) * 20))
+                love.graphics.print("> " .. obj.name, screenX + 5, screenY + yOffset + ((i - 1) * 20))
             else
                 love.graphics.setColor(0, 1, 0)
-                love.graphics.print("  " .. obj.name, screenX + 5, screenY + 5 + ((i - 1) * 20))
+                love.graphics.print("  " .. obj.name, screenX + 5, screenY + yOffset + ((i - 1) * 20))
+            end
+        end
+        love.graphics.setColor(1, 1, 1)
+    end
+
+    -- [NEW] Draw PUT menu overlay
+    if gameState == "CONTAINER_PUT" then
+        local screenX = ((Player.gridX * Map.tileSize) - Camera.x) * Camera.scale + 200
+        local screenY = ((Player.gridY * Map.tileSize) - Camera.y) * Camera.scale - 20
+
+        local itemCount = math.max(1, #Player.inventory)
+        
+        love.graphics.setColor(0, 0, 0, 0.95)
+        love.graphics.rectangle("fill", screenX, screenY, 180, itemCount * 20 + 50)
+        love.graphics.setColor(1, 1, 0)
+        love.graphics.rectangle("line", screenX, screenY, 180, itemCount * 20 + 50)
+        
+        love.graphics.print("YOUR INVENTORY", screenX + 5, screenY + 5)
+        love.graphics.setColor(0.7, 0.7, 0.7)
+        love.graphics.print("[E]Put [ESC]Cancel", screenX + 5, screenY + 20)
+        
+        if #Player.inventory == 0 then
+            love.graphics.setColor(0.5, 0.5, 0.5)
+            love.graphics.print("(Empty)", screenX + 5, screenY + 40)
+        else
+            for i, item in ipairs(Player.inventory) do
+                local yPos = screenY + 40 + ((i - 1) * 20)
+                if i == putMenuIndex then
+                    love.graphics.setColor(1, 1, 0)
+                    love.graphics.print("> " .. item.name, screenX + 5, yPos)
+                else
+                    love.graphics.setColor(1, 1, 1)
+                    love.graphics.print("  " .. item.name, screenX + 5, yPos)
+                end
             end
         end
         love.graphics.setColor(1, 1, 1)
     end
 
     love.graphics.print("Time: " .. Time.currentTime:upper(), 300, 10)
+end
+
+-- [NEW] Open a container and populate loot list
+function openContainer(container)
+    if not container.isContainer then return end
+    
+    if container.isEmpty() then
+        GameLog.add("The " .. container.name .. " is empty.", {0.5, 0.5, 0.5})
+        gameState = lastState
+        return
+    end
+    
+    -- Convert item IDs to display objects
+    lootList = {}
+    for i, itemId in ipairs(container.inventory) do
+        local itemDef = ItemDB.definitions[itemId]
+        if itemDef then
+            -- Create a proper item object with all properties
+            local item = {
+                id = itemId,
+                name = itemDef.name,
+                description = itemDef.description or "No description.",
+                weight = itemDef.weight or 0,
+                actionLabel = itemDef.actionLabel,
+                onUse = itemDef.onUse,
+                symbol = itemDef.symbol or "?",
+                color = itemDef.color or {1, 1, 1},
+                containerIndex = i -- Track position in container
+            }
+            table.insert(lootList, item)
+        else
+            print("Warning: Item ID '" .. itemId .. "' not found in ItemDB")
+        end
+    end
+    
+    if #lootList == 0 then
+        GameLog.add("The " .. container.name .. " is empty.", {0.5, 0.5, 0.5})
+        gameState = lastState
+        return
+    end
+    
+    currentContainer = container
+    lootIndex = 1
+    gameState = "LOOTING"
+    GameLog.add("Opened " .. container.name .. ".", {0, 1, 1})
 end
 
 function handleInteractCommand(dx, dy)
@@ -196,9 +275,15 @@ function handleInteractCommand(dx, dy)
         gameState = lastState
     elseif #items == 1 then
         local obj = items[1]
-        if obj.onInteract then obj.onInteract() end
-        if not obj.isBlocking then Objects.remove(obj) end
-        gameState = lastState
+        
+        -- [NEW] Check if it's a container
+        if obj.isContainer then
+            openContainer(obj)
+        else
+            if obj.onInteract then obj.onInteract() end
+            if not obj.isBlocking then Objects.remove(obj) end
+            gameState = lastState
+        end
     else
         lootList = items
         lootIndex = 1
@@ -233,8 +318,18 @@ end
 
 function love.keypressed(key)
     if key == "escape" then
-        if gameState == "MENU" or gameState == "LOOKING" or gameState == "INTERACT_QUERY" or gameState == "LOOTING" or gameState == "TARGETING" then
+        if gameState == "MENU" or gameState == "LOOKING" or gameState == "INTERACT_QUERY" or gameState == "LOOTING" or gameState == "TARGETING" or gameState == "CONTAINER_PUT" then
+            -- [NEW] If in PUT mode, go back to LOOTING
+            if gameState == "CONTAINER_PUT" then
+                gameState = "LOOTING"
+                return
+            end
+            
             gameState = lastState
+            -- Clear container reference when closing
+            if gameState ~= "LOOTING" then
+                currentContainer = nil
+            end
             return
         else
             love.event.quit()
@@ -257,7 +352,6 @@ function love.keypressed(key)
         return
     end
 
-    -- STATE: LOOKING
     if gameState == "LOOKING" then
         if key == "l" or key == "x" then gameState = lastState; GameLog.add("Cancelled looking."); return end
         if key == "space" or key == "return" or key == "e" then handleLookCommand(0, 0); return end
@@ -268,13 +362,10 @@ function love.keypressed(key)
         return
     end
 
-    -- STATE: COMBAT
     if gameState == "COMBAT" then
         local currentActor = Combat.turnQueue[Combat.turnIndex]
         
-        -- ONLY CONTROL IF IT IS PLAYER'S TURN
         if currentActor and currentActor.isPlayer then
-            -- MOVE: Costs handled inside Player.attemptMove now
             if key == "up" or key == "w" then
                 Player.attemptMove(0, -1)
             elseif key == "down" or key == "s" then
@@ -285,13 +376,11 @@ function love.keypressed(key)
                 Player.attemptMove(1, 0)
             end
             
-            -- SKIP TURN / WAIT
             if key == "space" then
                 GameLog.add("You catch your breath.", {0.5, 0.5, 1})
                 Combat.endTurn()
             end
 
-            -- RANGED TRIGGER
             if key == "f" then
                 targetList = {}
                 for _, actor in ipairs(Combat.turnQueue) do
@@ -311,7 +400,6 @@ function love.keypressed(key)
         return
     end
 
-    -- STATE: TARGETING
     if gameState == "TARGETING" then
         if key == "up" or key == "w" then
             targetIndex = targetIndex - 1
@@ -320,12 +408,11 @@ function love.keypressed(key)
             targetIndex = targetIndex + 1
             if targetIndex > #targetList then targetIndex = 1 end
         elseif key == "space" or key == "return" or key == "f" then
-            -- FIRE!
             local target = targetList[targetIndex]
             gameState = "COMBAT"
             
-            Combat.performAction(3, function() -- Costs 3 Stamina
-                local damage = 5 -- Pistol Damage
+            Combat.performAction(3, function()
+                local damage = 5
                 target.currentHP = target.currentHP - damage
                 GameLog.add("You shot " .. target.name .. " for " .. damage .. " dmg!", {1, 0.5, 0})
                 
@@ -339,7 +426,6 @@ function love.keypressed(key)
         return
     end
 
-    -- STATE: AWAKE
     if gameState == "AWAKE" then
         if key == "tab" or key == "m" then lastState = gameState; gameState = "MENU"; return end
         if key == "l" or key == "lctrl" then lastState = gameState; gameState = "LOOKING"; GameLog.add("Look where? (WASD)", { 1, 1, 0 }); return end
@@ -354,11 +440,19 @@ function love.keypressed(key)
             if #itemsUnderfoot > 1 then
                 lootList = itemsUnderfoot
                 lootIndex = 1
+                currentContainer = nil -- [NEW] Not a container
                 gameState = "LOOTING"
                 GameLog.add("Multiple items here.", { 1, 1, 0 })
                 return
             elseif #itemsUnderfoot == 1 then
                 local obj = itemsUnderfoot[1]
+                
+                -- [NEW] Check if it's a container
+                if obj.isContainer then
+                    openContainer(obj)
+                    return
+                end
+                
                 if obj.onInteract then
                     local shouldRemove = obj.onInteract()
                     if shouldRemove then Objects.remove(obj) end
@@ -372,19 +466,125 @@ function love.keypressed(key)
         end
     end
 
-    -- STATE: LOOTING
+    -- [UPDATED] Looting with container support - TAKE and PUT
     if gameState == "LOOTING" then
-        if key == "escape" or key == "x" or key == "tab" then gameState = lastState; lootList = {}; return end
-        if key == "up" or key == "w" then lootIndex = lootIndex - 1; if lootIndex < 1 then lootIndex = #lootList end end
-        if key == "down" or key == "s" then lootIndex = lootIndex + 1; if lootIndex > #lootList then lootIndex = 1 end end
+        if key == "escape" or key == "x" or key == "tab" then 
+            gameState = lastState
+            lootList = {}
+            currentContainer = nil
+            return 
+        end
+        
+        if key == "up" or key == "w" then 
+            lootIndex = lootIndex - 1
+            if lootIndex < 1 then lootIndex = #lootList end 
+        end
+        
+        if key == "down" or key == "s" then 
+            lootIndex = lootIndex + 1
+            if lootIndex > #lootList then lootIndex = 1 end 
+        end
 
+        -- [NEW] TAKE from container (E or Space)
         if key == "space" or key == "return" or key == "e" then
             local obj = lootList[lootIndex]
             local shouldRemove = false
-            if obj.onInteract then shouldRemove = obj.onInteract() end
-            if shouldRemove then Objects.remove(obj); table.remove(lootList, lootIndex) end
-            if #lootList == 0 then gameState = lastState
-            elseif lootIndex > #lootList then lootIndex = #lootList end
+            
+            if currentContainer then
+                -- TAKE: Add to player inventory
+                local success = Player.addItem(
+                    obj.id,
+                    obj.name,
+                    obj.description,
+                    obj.weight,
+                    obj.actionLabel,
+                    obj.onUse
+                )
+                
+                if success then
+                    GameLog.add("Took " .. obj.name .. ".", {0, 1, 0})
+                    -- Remove from container's inventory
+                    for i, itemId in ipairs(currentContainer.inventory) do
+                        if itemId == obj.id then
+                            table.remove(currentContainer.inventory, i)
+                            break
+                        end
+                    end
+                    shouldRemove = true
+                else
+                    GameLog.add("Inventory Full!", {1, 0, 0})
+                end
+            else
+                -- Regular ground item interaction
+                if obj and obj.onInteract then 
+                    shouldRemove = obj.onInteract() 
+                else
+                    GameLog.add("Can't interact with " .. (obj.name or "that") .. ".", {1, 0, 0})
+                end
+            end
+            
+            if shouldRemove then
+                if not currentContainer then
+                    Objects.remove(obj)
+                end
+                table.remove(lootList, lootIndex)
+            end
+            
+            if #lootList == 0 then 
+                gameState = lastState
+                currentContainer = nil
+            elseif lootIndex > #lootList then 
+                lootIndex = #lootList 
+            end
+        end
+        
+        -- [NEW] PUT into container (R key)
+        if key == "r" and currentContainer then
+            -- Switch to PUT mode
+            gameState = "CONTAINER_PUT"
+            putMenuIndex = 1
+            GameLog.add("Select item to put in " .. currentContainer.name, {1, 1, 0})
+        end
+        
+        return
+    end
+    
+    -- [NEW] CONTAINER_PUT state - Player choosing item to store
+    if gameState == "CONTAINER_PUT" then
+        if #Player.inventory == 0 then
+            GameLog.add("You have no items to put.", {1, 0, 0})
+            gameState = "LOOTING"
+            return
+        end
+        
+        if key == "up" or key == "w" then
+            putMenuIndex = putMenuIndex - 1
+            if putMenuIndex < 1 then putMenuIndex = #Player.inventory end
+        elseif key == "down" or key == "s" then
+            putMenuIndex = putMenuIndex + 1
+            if putMenuIndex > #Player.inventory then putMenuIndex = 1 end
+        elseif key == "e" or key == "space" or key == "return" then
+            -- Put the selected item into the container
+            local item = Player.inventory[putMenuIndex]
+            
+            if item and currentContainer then
+                -- Add item ID to container
+                currentContainer.addItem(item.id)
+                
+                GameLog.add("Put " .. item.name .. " in " .. currentContainer.name .. ".", {0, 1, 1})
+                
+                -- Remove from player inventory
+                Player.removeItem(putMenuIndex)
+                
+                -- Adjust putMenuIndex if needed
+                if putMenuIndex > #Player.inventory then
+                    putMenuIndex = math.max(1, #Player.inventory)
+                end
+                
+                -- Return to looting and refresh the container view
+                gameState = "LOOTING"
+                openContainer(currentContainer)
+            end
         end
         return
     end

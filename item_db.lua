@@ -7,7 +7,7 @@ ItemDB.definitions = {
     ["medkit"] = Classes.Consumable({
         name = "Medkit", symbol = "M", color = {1, 0, 0}, weight = 2.0,
         description = "Restores massive health.",
-        heal = 50 -- The class handles the logic!
+        heal = 50
     }),
     
     ["bandage"] = Classes.Consumable({
@@ -26,7 +26,7 @@ ItemDB.definitions = {
     ["whiskey"] = Classes.Consumable({
         name = "Whiskey", symbol = "w", color = {0.8, 0.5, 0}, weight = 1.0,
         description = "Reduces stress.",
-        stress = 30 -- The class handles this too!
+        stress = 30
     }),
 
     -- === WEAPONS ===
@@ -64,7 +64,36 @@ ItemDB.definitions = {
     ["vending_machine"] = Classes.Furniture({
         name = "Vending Machine", symbol = "V", color = {0.2, 0.2, 0.8},
         msg = "The machine is empty."
-    })
+    }),
+
+    -- === CONTAINERS ===
+    ["footlocker"] = Classes.Container({
+        name = "Footlocker",
+        symbol = "=",
+        color = {0.6, 0.4, 0.2},
+        description = "A sturdy metal footlocker."
+    }),
+
+    ["safe"] = Classes.Container({
+        name = "Safe",
+        symbol = "$",
+        color = {0.3, 0.3, 0.3},
+        description = "A secure safe."
+    }),
+
+    ["crate"] = Classes.Container({
+        name = "Wooden Crate",
+        symbol = "C",
+        color = {0.5, 0.3, 0.1},
+        description = "A weathered wooden crate."
+    }),
+
+    ["backpack"] = Classes.Container({
+        name = "Backpack",
+        symbol = "B",
+        color = {0.2, 0.4, 0.2},
+        description = "A worn backpack."
+    }),
 }
 
 return ItemDB

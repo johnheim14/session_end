@@ -11,7 +11,7 @@ Menu.selectionIndex = 1
 
 -- Submenu State
 Menu.isSubmenuOpen = false
-Menu.submenuOptions = {} -- Will populate dynamically
+Menu.submenuOptions = {}
 Menu.submenuIndex = 1
 
 function Menu.draw()
@@ -49,7 +49,6 @@ function Menu.draw()
 end
 
 function Menu.drawStatsContent()
-    -- (Keep your existing stats draw code)
     love.graphics.print("--- VITALS ---", 70, 120)
     love.graphics.print("NAME:   " .. Player.name, 70, 150)
     love.graphics.print("HEALTH: " .. Player.currentHealth .. " / " .. Player.maxHealth, 70, 170)
@@ -77,36 +76,33 @@ function Menu.drawInventoryContent()
         end
     end
     
-    -- [NEW] Draw Submenu ON TOP if open
     if Menu.isSubmenuOpen then
         Menu.drawSubmenu()
     end
 end
 
 function Menu.drawSubmenu()
-    -- Draw a small box near the selected item
     local x = 200
     local y = 130 + ((Menu.selectionIndex-1) * 20)
     local w, h = 120, (#Menu.submenuOptions * 20) + 10
     
-    love.graphics.setColor(0, 0, 0, 1) -- Opaque black
+    love.graphics.setColor(0, 0, 0, 1)
     love.graphics.rectangle("fill", x, y, w, h)
-    love.graphics.setColor(1, 1, 1) -- White border
+    love.graphics.setColor(1, 1, 1)
     love.graphics.rectangle("line", x, y, w, h)
     
     for i, option in ipairs(Menu.submenuOptions) do
         if i == Menu.submenuIndex then
-            love.graphics.setColor(1, 1, 0) -- Selected Yellow
+            love.graphics.setColor(1, 1, 0)
             love.graphics.print("> " .. option, x + 10, y + 5 + ((i-1)*20))
         else
-            love.graphics.setColor(1, 1, 1) -- White
+            love.graphics.setColor(1, 1, 1)
             love.graphics.print("  " .. option, x + 10, y + 5 + ((i-1)*20))
         end
     end
 end
 
 function Menu.keypressed(key)
-    -- If Submenu is open, hijack controls
     if Menu.isSubmenuOpen then
         if key == "up" or key == "w" then
             Menu.submenuIndex = Menu.submenuIndex - 1
@@ -115,11 +111,11 @@ function Menu.keypressed(key)
             Menu.submenuIndex = Menu.submenuIndex + 1
             if Menu.submenuIndex > #Menu.submenuOptions then Menu.submenuIndex = 1 end
         elseif key == "escape" or key == "x" then
-            Menu.isSubmenuOpen = false -- Close submenu
+            Menu.isSubmenuOpen = false
         elseif key == "return" or key == "space" or key == "e" then
             Menu.executeSubmenuAction()
         end
-        return -- Stop here so we don't scroll inventory behind the menu
+        return
     end
 
     -- Tab Switching
@@ -140,13 +136,12 @@ function Menu.keypressed(key)
             Menu.selectionIndex = Menu.selectionIndex + 1
             if Menu.selectionIndex > #Player.inventory then Menu.selectionIndex = 1 end
         elseif key == "return" or key == "space" or key == "e" then
-            -- Open Submenu
             local item = Player.inventory[Menu.selectionIndex]
             Menu.submenuOptions = {}
             
-            -- Add "Use/Equip" option if valid
-            if item.actionName then
-                table.insert(Menu.submenuOptions, item.actionName) -- e.g. "CONSUME"
+            -- [FIX] Use actionLabel consistently
+            if item.actionLabel then
+                table.insert(Menu.submenuOptions, item.actionLabel)
             else
                 table.insert(Menu.submenuOptions, "USE")
             end
@@ -167,24 +162,27 @@ function Menu.executeSubmenuAction()
     if action == "DROP" then
         Player.dropItem(Menu.selectionIndex)
         Menu.isSubmenuOpen = false
-        if Menu.selectionIndex > #Player.inventory then Menu.selectionIndex = math.max(1, #Player.inventory) end
+        if Menu.selectionIndex > #Player.inventory then 
+            Menu.selectionIndex = math.max(1, #Player.inventory) 
+        end
         
     elseif action == "CANCEL" then
         Menu.isSubmenuOpen = false
         
     else -- USE / CONSUME / EQUIP
         if item.onUse then
-            -- Execute the function
-            item.onUse()
+            -- [FIX] Execute and check return value
+            local shouldRemove = item.onUse()
             
-            -- Logic: If it was a consumable (like a Medkit), we should remove it.
-            -- If it was a weapon (Equip), we keep it.
-            -- For simplicity: If actionName is "CONSUME", remove it.
-            if item.actionName == "CONSUME" then
+            -- Remove item if onUse returns true (consumables do this)
+            if shouldRemove then
                 Player.removeItem(Menu.selectionIndex)
+                if Menu.selectionIndex > #Player.inventory then 
+                    Menu.selectionIndex = math.max(1, #Player.inventory) 
+                end
             end
         else
-            GameLog.add("You can't use that.")
+            GameLog.add("You can't use that.", {1, 0, 0})
         end
         Menu.isSubmenuOpen = false
     end
