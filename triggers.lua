@@ -63,24 +63,27 @@ function Triggers.activate(trigger)
     if not trigger or not trigger.properties then return end
     
     local props = trigger.properties
-    
-    -- Location change trigger
-    if props.type == "location_trigger" and props.location then
-        local Map = require "map"
-        local GameLog = require "gamelog"
-        
-        if props.location == "indoor" then
-            Map.setLocation(Map.INDOOR)
-            GameLog.add("Entered: " .. (trigger.name or "Building"), {0.8, 0.8, 0.5})
-        elseif props.location == "outdoor" then
-            Map.setLocation(Map.OUTDOOR)
-            GameLog.add("Exited: " .. (trigger.name or "Building"), {0.5, 0.8, 0.8})
-        end
+    local Map = require "map"
+    local GameLog = require "gamelog"
+
+    -- EXISTING LOGIC for location type
+    if props.location == "indoor" then
+        Map.setLocation(Map.INDOOR)
+    elseif props.location == "outdoor" then
+        Map.setLocation(Map.OUTDOOR)
     end
-    
-    -- You can add more trigger types here later:
-    -- if props.type == "cutscene_trigger" then ...
-    -- if props.type == "enemy_spawn" then ...
+
+    -- NEW LOGIC: Map Switching
+    if props.target_map then
+        -- Use defaults if x/y are missing
+        local tx = props.target_x or 2
+        local ty = props.target_y or 2
+        
+        GameLog.add("Traveling...", {1, 1, 1})
+        
+        -- Call the function we created in Step 1
+        Map.changeLevel(props.target_map, tx, ty)
+    end
 end
 
 -- Optional: Draw trigger bounds for debugging

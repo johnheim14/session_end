@@ -22,7 +22,7 @@ function Map.load()
     local Triggers = require "triggers" -- [NEW]
 
     print("--- LOADING MAP ---")
-    Map.currentLevel = sti("assets/overworld.lua")
+    Map.currentLevel = sti("assets/maps/overworld.lua")
     Map.tileSize = 32
 
     local layer = Map.currentLevel.layers["Floor"]
@@ -262,6 +262,60 @@ end
 
 function Map.resize(w, h)
     Map.currentLevel:resize(w, h)
+end
+
+function Map.changeLevel(mapFile, targetGridX, targetGridY)
+    local Player = require "player"
+    local Objects = require "objects"
+    local Triggers = require "triggers"
+
+    -- 1. Clear current state
+    Objects.clear()
+    Triggers.clear()
+    
+    -- 2. Load the new map file via STI
+    -- Ensure we pass the full path or relative path correctly
+    print("Switching to map: " .. mapFile)
+    Map.currentLevel = sti(mapFile)
+
+    -- 3. Reset Grid / Collision / FOV data
+    -- (Reuse your existing initialization logic here)
+    local layer = Map.currentLevel.layers["Floor"] or Map.currentLevel.layers["Floors"]
+    local mapWidth = layer.width or Map.currentLevel.width
+    local mapHeight = layer.height or Map.currentLevel.height
+
+    Map.visibilityGrid = {}
+    Map.distanceGrid = {}
+    
+    for y = 1, mapHeight do
+        Map.visibilityGrid[y] = {}
+        Map.distanceGrid[y] = {}
+        for x = 1, mapWidth do
+            Map.visibilityGrid[y][x] = Map.HIDDEN
+            Map.distanceGrid[y][x] = 0
+        end
+    end
+
+    -- 4. Parse new Layers (Entities, Triggers)
+    local entityLayer = Map.currentLevel.layers["Entities"]
+    if entityLayer then
+        for _, obj in pairs(entityLayer.objects) do
+            local gx = math.floor(obj.x / Map.tileSize) + 1
+            local gy = math.floor(obj.y / Map.tileSize) + 1
+            Objects.spawnFromDB(obj.name, gx, gy)
+        end
+        entityLayer.visible = false
+    end
+
+    -- Reload triggers for the new map
+    Triggers.load()
+
+    -- 5. Move Player to the spawn point of the new map
+    Player.gridX = targetGridX
+    Player.gridY = targetGridY
+    
+    -- Update FOV immediately so the screen isn't black
+    Map.updateFOV(Player.gridX, Player.gridY)
 end
 
 function Map.isBlocked(gridX, gridY)
