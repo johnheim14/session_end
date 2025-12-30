@@ -8,18 +8,30 @@ function Player.load()
     Player.gridY = 2
     Player.name = "Wanderer"
 
-    -- Stats & Inventory (Keep your existing stats/inventory code here)
-    Player.maxHealth = 100; Player.currentHealth = 80
-    Player.maxStress = 100; Player.currentStress = 10
-    Player.inventory = {}
-    Player.maxWeight = 50.0; Player.currentWeight = 0.0
+    -- [FIXED] 1. DEFINE STATS FIRST so derived stats can use them
     Player.stats = { strength = 5, intelligence = 5, dexterity = 5, senses = 5, reflexes = 5, endurance = 5 }
     Player.statPoints = 0; Player.taggedSkills = {}
+
+    -- 2. Derived Stats
+    Player.maxHealth = 100; Player.currentHealth = 80
+    Player.maxStress = 100; Player.currentStress = 10
+    
+    -- Now this works because Player.stats exists!
+    Player.maxStamina = 5 + math.floor(Player.stats.endurance / 2)
+    Player.currentStamina = Player.maxStamina
+
+    Player.inventory = {}
+    Player.maxWeight = 50.0; Player.currentWeight = 0.0
 
     -- === NEW ANIMATION VARIABLES ===
     Player.facing = "down" -- "up", "down", "left", "right"
     Player.animTimer = 0.0
     Player.isMoving = false
+end
+
+function Player.refreshStamina()
+    Player.maxStamina = 5 + math.floor(Player.stats.endurance / 2)
+    Player.currentStamina = Player.maxStamina
 end
 
 -- (Keep addItem, removeItem, dropItem exactly as they are)
@@ -63,37 +75,74 @@ function Player.attemptMove(dx, dy)
     local targetX = Player.gridX + dx
     local targetY = Player.gridY + dy
 
-    -- (Keep your existing collision logic)
+    -- Map Collision
     if Map.isBlocked(targetX, targetY) then return end
 
+    -- Object Collision & Interaction
     local ObjManager = require "objects"
+    local Combat = require "combat"
     local allObjects = ObjManager.getAllAt(targetX, targetY)
+    
     for _, obj in ipairs(allObjects) do
         if obj.isBlocking then
+            -- [NEW] MELEE COMBAT LOGIC
+            if obj.isEnemy then
+                 -- 1. If in Combat, spend AP to attack
+                 if Combat.isActive then
+                     Combat.performAction(2, function() -- Costs 2 Stamina
+                         local damage = math.max(1, Player.stats.strength) -- Simple Dmg Formula
+                         obj.currentHP = obj.currentHP - damage
+                         
+                         GameLog.add("You hit " .. obj.name .. " for " .. damage .. " dmg!", {1, 0, 0})
+                         
+                         -- Death Check
+                         if obj.currentHP <= 0 then
+                             GameLog.add(obj.name .. " dies.", {1, 0.5, 0})
+                             ObjManager.remove(obj)
+                             Combat.removeFromQueue(obj)
+                         end
+                     end)
+                 else
+                     -- 2. If NOT in Combat, Start it!
+                     Combat.start(Player, {obj}) -- Just start combat
+                 end
+                 return -- Stop movement
+            end
+
             GameLog.add("Blocked by " .. obj.name .. "."); return
         end
     end
 
-    Player.gridX = targetX
-    Player.gridY = targetY
+    -- DEFINE THE MOVE FUNCTION (To be called depending on cost)
+    local function executeMove()
+        Player.gridX = targetX
+        Player.gridY = targetY
 
-    -- [NEW] Update FOV on move
-    Map.updateFOV(Player.gridX, Player.gridY)
-    local Triggers = require "triggers"
-    local trigger = Triggers.check(Player.gridX, Player.gridY)
-    if trigger then
-        Triggers.activate(trigger)
-    end
-    local items = {}
-    for _, obj in ipairs(allObjects) do if not obj.isBlocking then table.insert(items, obj) end end
-
-    if #items > 0 then
-        -- Only show message if the items are actually visible!
-        if Map.isVisible(targetX, targetY) then
-            local msg = "You see a " .. items[1].name
-            if #items > 1 then msg = msg .. " and others" end
-            GameLog.add(msg .. ".", { 0, 1, 1 })
+        -- [NEW] Update FOV on move
+        Map.updateFOV(Player.gridX, Player.gridY)
+        local Triggers = require "triggers"
+        local trigger = Triggers.check(Player.gridX, Player.gridY)
+        if trigger then
+            Triggers.activate(trigger)
         end
+        local items = {}
+        for _, obj in ipairs(allObjects) do if not obj.isBlocking then table.insert(items, obj) end end
+
+        if #items > 0 then
+            -- Only show message if the items are actually visible!
+            if Map.isVisible(targetX, targetY) then
+                local msg = "You see a " .. items[1].name
+                if #items > 1 then msg = msg .. " and others" end
+                GameLog.add(msg .. ".", { 0, 1, 1 })
+            end
+        end
+    end
+
+    -- [FIX] CHARGE STAMINA FOR MOVEMENT ONLY IN COMBAT
+    if Combat.isActive then
+         Combat.performAction(1, executeMove)
+    else
+         executeMove()
     end
 end
 
@@ -115,14 +164,10 @@ function Player.draw()
     love.graphics.setColor(1, 1, 1)
 
     -- 1. Determine which Sheet to use
-    -- Since movement is instant grid-hopping, we mostly see Idle.
-    -- Later, if we add smooth movement, we would switch to 'walk' here.
     local spriteSheet = Assets.playerIdle
     local frames = Assets.player.idle[Player.facing]
 
     -- 2. Determine which Frame to use based on Timer
-    -- '0.5' is the speed (change frame every 0.5 seconds)
-    -- We use math.floor and modulo (%) to loop the index
     local frameIndex = math.floor(Player.animTimer / 0.5) % #frames + 1
     local currentQuad = frames[frameIndex]
 

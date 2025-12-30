@@ -96,31 +96,22 @@ function Map.isTransparent(x, y)
     local wallLayer = Map.currentLevel.layers["Walls"]
     if not wallLayer then return true end
     
-    -- Get map dimensions
+    -- Check bounds
     local mapWidth = wallLayer.width or Map.currentLevel.width
     local mapHeight = wallLayer.height or Map.currentLevel.height
     
-    -- Check bounds
     if y < 1 or y > mapHeight or x < 1 or x > mapWidth then
-        return false
+        return false -- OOB is not transparent
     end
     
-    -- Try STI's getTileInstance method first
-    if wallLayer.getTileInstance then
-        local tile = wallLayer:getTileInstance(x, y)
-        return tile == nil  -- No tile means transparent
+    -- Check tile existence at [y][x]
+    if wallLayer.data and wallLayer.data[y] then
+        local tile = wallLayer.data[y][x]
+        -- If a tile exists, it blocks light (returns false)
+        return tile == nil
     end
     
-    -- Fallback: Convert 2D grid coordinates to 1D array index
-    local index = (y - 1) * mapWidth + x
-    local tileID = wallLayer.data[index]
-    
-    -- If there's no tile (0 or nil), it's transparent
-    if not tileID or tileID == 0 then
-        return true
-    end
-    
-    return false
+    return true
 end
 
 function Map.updateFOV(px, py)
@@ -322,31 +313,22 @@ function Map.isBlocked(gridX, gridY)
     local wallLayer = Map.currentLevel.layers["Walls"]
     if not wallLayer then return false end
 
-    -- Get map dimensions
+    -- Check bounds first
     local mapWidth = wallLayer.width or Map.currentLevel.width
     local mapHeight = wallLayer.height or Map.currentLevel.height
 
-    -- Check bounds
     if gridY < 1 or gridY > mapHeight or gridX < 1 or gridX > mapWidth then
-        return true
+        return true -- Block movement out of bounds
     end
 
-    -- Try STI's getTileInstance method first (handles all formats)
-    if wallLayer.getTileInstance then
-        local tile = wallLayer:getTileInstance(gridX, gridY)
+    -- STI stores tile data as layer.data[y][x]
+    if wallLayer.data and wallLayer.data[gridY] then
+        local tile = wallLayer.data[gridY][gridX]
+        -- If a tile object exists here, it is blocked
         return tile ~= nil
     end
-    
-    -- Fallback: Convert 2D grid coordinates to 1D array index
-    local index = (gridY - 1) * mapWidth + gridX
-    local tileID = wallLayer.data[index]
-    
-    -- If there's no tile (0 or nil), it's not blocked
-    if not tileID or tileID == 0 then
-        return false
-    end
-    
-    return true
+
+    return false
 end
 
 return Map

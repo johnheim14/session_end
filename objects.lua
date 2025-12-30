@@ -1,4 +1,5 @@
 local ItemDB = require "item_db"
+local EnemyDB = require "enemy_db"
 local Player = require "player"
 local GameLog = require "gamelog"
 local Map = require "map"
@@ -39,41 +40,75 @@ function Objects.remove(objectToRemove)
     end
 end
 
--- [UPDATED] spawnFromDB to handle weight logic
+-- [UPDATED] spawnFromDB to handle items AND enemies
 function Objects.spawnFromDB(id, x, y)
-    local def = ItemDB.definitions[id]
-    if not def then print("Error: ID '"..id.."' not found"); return end
-
-    local interactionLogic
-    
-    if def.isBlocking then
-        interactionLogic = function()
-            if def.onInteract then def.onInteract() end
-            return false 
-        end
-    else
-        interactionLogic = function()
-            -- [UPDATED] Pass 'id' and 'actionLabel' to Player.addItem
-            local success = Player.addItem(
-                id,                  -- The DB ID (e.g. "medkit")
-                def.name, 
-                def.description, 
-                def.weight, 
-                def.actionLabel,     -- New field! (e.g. "Consume")
-                def.onUse
-            )
-            
-            if success then
-                GameLog.add("Picked up " .. def.name .. ".", {0, 1, 0})
-                return true
-            else
-                GameLog.add("Inventory Full!", {1, 0, 0})
-                return false
+    -- 1. Check Item Database First
+    local itemDef = ItemDB.definitions[id]
+    if itemDef then
+        local interactionLogic
+        
+        if itemDef.isBlocking then
+            interactionLogic = function()
+                if itemDef.onInteract then itemDef.onInteract() end
+                return false 
+            end
+        else
+            interactionLogic = function()
+                local success = Player.addItem(
+                    id,
+                    itemDef.name, 
+                    itemDef.description, 
+                    itemDef.weight, 
+                    itemDef.actionLabel,
+                    itemDef.onUse
+                )
+                
+                if success then
+                    GameLog.add("Picked up " .. itemDef.name .. ".", {0, 1, 0})
+                    return true
+                else
+                    GameLog.add("Inventory Full!", {1, 0, 0})
+                    return false
+                end
             end
         end
+
+        Objects.spawn(itemDef.name, x, y, itemDef.symbol, itemDef.color, itemDef.isBlocking, interactionLogic)
+        return
     end
 
-    Objects.spawn(def.name, x, y, def.symbol, def.color, def.isBlocking, interactionLogic)
+    -- 2. Check Enemy Database [NEW]
+    local enemyDef = EnemyDB.definitions[id]
+    if enemyDef then
+        -- Define Enemy Interaction (Attack Trigger handled in Player.lua, so this is fallback)
+        local interactionLogic = function()
+             return false 
+        end
+
+        -- Create the Object manually to add HP/Stats
+        local obj = {
+            name = enemyDef.name,
+            x = x, y = y,
+            symbol = enemyDef.symbol,
+            color = enemyDef.color,
+            isBlocking = true,
+            isEnemy = true, -- [IMPORTANT] Flag for logic
+            onInteract = interactionLogic,
+            
+            -- Combat Stats
+            maxHP = enemyDef.maxHP,
+            currentHP = enemyDef.maxHP,
+            stats = enemyDef.stats or {},
+            maxStamina = 5, -- Default
+            currentStamina = 5,
+        }
+        
+        table.insert(Objects.list, obj)
+        print("Spawned Enemy: " .. id)
+        return
+    end
+
+    print("Error: ID '"..id.."' not found in ItemDB or EnemyDB")
 end
 
 function Objects.interactAt(x, y)

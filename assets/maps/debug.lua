@@ -10,7 +10,7 @@ return {
   tilewidth = 32,
   tileheight = 32,
   nextlayerid = 5,
-  nextobjectid = 16,
+  nextobjectid = 17,
   properties = {},
   tilesets = {
     {
@@ -282,6 +282,19 @@ return {
           shape = "point",
           x = 112,
           y = 148.5,
+          width = 0,
+          height = 0,
+          rotation = 0,
+          visible = true,
+          properties = {}
+        },
+        {
+          id = 16,
+          name = "RadRoach",
+          type = "",
+          shape = "point",
+          x = 496,
+          y = 116,
           width = 0,
           height = 0,
           rotation = 0,
